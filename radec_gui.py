@@ -31,13 +31,14 @@ BOX_HL  = "#606060"
 
 FONT_HINT = ("Segoe UI",  10)
 FONT_TTL  = ("Segoe UI",  10, "bold")
-FONT_MONO = ("Consolas",  12)
+FONT_MONO = ("Consolas",  12, "bold")
 FONT_RES  = ("Consolas",  12, "bold")
+FONT_ERR  = ("Segoe UI",   9)
 FONT_BTN  = ("Segoe UI",  10, "bold")
 
 # ── Dimensions fixes ───────────────────────────────────────────────────────
 BOX_W   = 300   # largeur px — entrée ET sortie identiques
-BOX_H   = 78    # hauteur px
+BOX_H   = 96    # hauteur px (augmenté pour le sélecteur d'unité RA)
 BTN_W   = 100
 COL_PAD = 16    # espace entre colonnes
 
@@ -112,7 +113,7 @@ class FixedBox:
                                    bg=BG3, fg=FG, insertbackground=FG,
                                    relief="flat", bd=2,
                                    highlightthickness=0)
-        self.widget.grid(row=1, column=0, sticky="ew", padx=6)
+        self.widget.grid(row=1, column=0, sticky="new", padx=6, pady=(2, 0))
 
         tk.Label(self.frame, text=hint, bg=BG3, fg=FG2,
                  font=FONT_HINT, anchor="w"
@@ -122,7 +123,8 @@ class FixedBox:
         return self.widget.get().strip() if not self.is_output else ""
 
     def show(self, text, ok=True):
-        self.widget.config(text=text, fg=OK_COL if ok else ERR_COL)
+        self.widget.config(text=text, fg=OK_COL if ok else ERR_COL,
+                           font=FONT_RES if ok else FONT_ERR)
         if ok and self.root:
             copy_clip(self.root, text)
 
@@ -231,13 +233,13 @@ class RADecTab:
         g.add_title("Sexagésimal  →  Décimal")
 
         self.in_ra_s   = FixedBox(f, "RA  (hh mm ss.s)",
-                                  "ex : 05 34 32.0 ou 05h34m32s ou 05:34:32")
+                                  "ex : 05 34 32.0  ou  05h34m32s")
         self.out_ra_s  = FixedBox(f, "RA décimal", "heures décimaux",
                                   is_output=True)
         g.add_row(self.in_ra_s,  "→ déc.", self._conv_ra_s2d,  self.out_ra_s)
 
         self.in_dec_s  = FixedBox(f, "DEC  (±dd mm ss.s)",
-                                  "ex : +22 00 52.0 ou -05d12m33s ou -05:12:33")
+                                  "ex : +22 00 52.0  ou  -05d12m33s")
         self.out_dec_s = FixedBox(f, "DEC décimal", "degrés décimaux",
                                   is_output=True)
         g.add_row(self.in_dec_s, "→ déc.", self._conv_dec_s2d, self.out_dec_s)
@@ -247,14 +249,27 @@ class RADecTab:
         # ── Section 2 : Décimal → Sexagésimal ─────────────────────────
         g.add_title("Décimal  →  Sexagésimal")
 
-        self.in_ra_d   = FixedBox(f, "RA  (heures décimaux)",
-                                  "ex : 5.575556   plage [0 à 24]")
+        self.ra_unit = tk.StringVar(value="h")
+        self.in_ra_d = FixedBox(f, "RA  (heures ou degrés décimaux)",
+                                "ex : 5.575556 h   ou   285.50°")
+        # Radiobuttons unité, insérés sous le hint existant
+        unit_frame = tk.Frame(self.in_ra_d.frame, bg=BG3)
+        unit_frame.grid(row=3, column=0, sticky="w", padx=4, pady=(0, 4))
+        self.in_ra_d.frame.rowconfigure(3, weight=0)
+        for val, lbl in [("h", "heures [0–24]"), ("deg", "degrés [0–360]")]:
+            tk.Radiobutton(unit_frame, text=lbl, value=val,
+                           variable=self.ra_unit,
+                           bg=BG3, fg=FG, selectcolor=BG3,
+                           activebackground=BG3, activeforeground=FG,
+                           font=FONT_HINT, highlightthickness=0
+                           ).pack(side="left", padx=(0, 8))
+
         self.out_ra_d  = FixedBox(f, "RA sexagésimal", "hh mm ss.sss",
                                   is_output=True)
         g.add_row(self.in_ra_d,  "→ sex.", self._conv_ra_d2s,  self.out_ra_d)
 
         self.in_dec_d  = FixedBox(f, "DEC  (degrés décimaux)",
-                                  "ex : +22.014444   plage [-90 à +90]")
+                                  "ex : +22.0144   plage [-90 à +90]")
         self.out_dec_d = FixedBox(f, "DEC sexagésimal", "±dd mm ss.sss",
                                   is_output=True)
         g.add_row(self.in_dec_d, "→ sex.", self._conv_dec_d2s, self.out_dec_d)
@@ -298,9 +313,17 @@ class RADecTab:
             self.out_ra_d.show("⚠ Entrez une valeur RA", ok=False); return
         try:
             v = float(raw)
-            errs = validate_decimal_ra(v)
-            if errs: self.out_ra_d.show("⚠ " + "  ".join(errs), ok=False); return
-            h, m, s = ra_dec2sex(v)
+            if self.ra_unit.get() == "deg":
+                if not (0 <= v < 360):
+                    self.out_ra_d.show(
+                        f"⚠ RA {v}° invalide — plage [0 – 360]", ok=False)
+                    return
+                v_h = v / 15.0   # 360° = 24h  ->  15°/h
+            else:
+                errs = validate_decimal_ra(v)
+                if errs: self.out_ra_d.show("⚠ " + "  ".join(errs), ok=False); return
+                v_h = v
+            h, m, s = ra_dec2sex(v_h)
             self.out_ra_d.show(fmt_ra_sex(h, m, s))
         except ValueError:
             self.out_ra_d.show("⚠ Valeur numérique attendue", ok=False)
@@ -332,8 +355,8 @@ class PeriodTab:
         g.add_title("Jours décimaux  →  jj  hh  mm  ss")
 
         self.in_j2h  = FixedBox(f, "Période (jours décimaux)",
-                                 "ex : 0.33695 (RR Lyr)   1.08857 (δ Cep)")
-        self.out_j2h = FixedBox(f, "Période hms", "jj hh mm ss.sss",
+                                 "ex : 1.08857 (δ Cep)")
+        self.out_j2h = FixedBox(f, "Période hms", "jj hh mm ss.s",
                                  is_output=True)
         g.add_row(self.in_j2h, "→ hms", self._day2hms, self.out_j2h)
 
@@ -372,7 +395,7 @@ class PeriodTab:
             setattr(self, attr, e)
             e.bind("<Return>", lambda _: self._hms2day_fields())
 
-        tk.Label(self.in_hms4, text="ex : 0  8  3  42.08",
+        tk.Label(self.in_hms4, text="ex : 0  8  3  42.08  (RR Lyr)",
                  bg=BG3, fg=FG2, font=FONT_HINT, anchor="w"
                  ).grid(row=2, column=0, sticky="w", padx=6, pady=(0,3))
 
@@ -455,7 +478,7 @@ class App(tk.Tk):
         ftr = tk.Frame(self, bg=SEP, pady=3)
         ftr.pack(fill="x")
         tk.Label(ftr,
-                 text="Résultat copié dans le presse-papiers  —  Entrée pour valider",
+                 text="Entrée pour valider  -  Le résultat est copié dans le presse-papiers",
                  font=FONT_HINT, bg=SEP, fg=FG2).pack()
 
         self.after(60, self._size)
